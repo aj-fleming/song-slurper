@@ -1,0 +1,5 @@
+# don't publish secrets 
+secrets.json
+
+.vscode
+__ipynb_checkpoints__
