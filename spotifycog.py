@@ -1,24 +1,14 @@
+from dataclasses import dataclass
 import json
 import os
-import time
-import string
+from datetime import datetime, timezone
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 
 import discord
 from discord.ext import commands, tasks
 
-
-class SpotifyURI:
-    def __init__(self, resource_type, id):
-        self.resource_type = resource_type
-        self.id = id
-
-    def __str__(self) -> str:
-        return "spotify:{0}:{1}".format(self.resource_type, self.id)
-
-    def __eq__(self, __o: object) -> bool:
-        return (__o.id == self.id) if isinstance(__o, SpotifyURI) else False
+from utils import SongRecMeta, SpotifyURI
 
 
 def is_valid_spotify_uri(uri):
@@ -44,29 +34,43 @@ def is_user(uri):
 def is_artist(uri):
     return uri.resource_type == "artist"
 
+def which_week():
+        """ return the current year and week as a 2-tuple of ints"""
+        utc_now = datetime.now(tz=timezone.utc)
+        this_week = utc_now.isocalendar()[:2]
+        return this_week
 
-def extract_spotify_uri(spotify_link: str) -> SpotifyURI:
-    s = spotify_link.strip().split("/")
-    if "open.spotify.com" not in s:
-        return SpotifyURI(None, None)
-    # we have a spotify link, remove any GET parameters from the last bit
-    # and fuse everything back together
-    uri = SpotifyURI(s[-2], s[-1].split("&")[0])
-    return uri
+def pl_file_str(week):
+    return "songs.{0}.{1}.json".format(*week)
 
 
 class SpotifyCog(commands.Cog, name="Spotify"):
     def __init__(self, bot):
+        # set up clean state
         self.bot = bot
-        self.listening_in = set()
-        self.recs_at = set()
+        self.listening_in = set()  # channel IDs to get spotify links from
+        self.recs_at = set()  # channel IDs to post playlist links to
+
         if os.path.isfile("slurper_state/spotify.json"):
             self.load_previous_state()
-        print("Connecting to Spotify...")
-        auth = SpotifyClientCredentials()
-        self.spotify = spotipy.Spotify(auth_manager=auth)
-        print("Spotify cog ready!")
 
+        # songs: dict from (year, week) -> SongRecMeta struct
+        self.songs = dict()
+        this_week = which_week()
+        self.songs.update({this_week: set()})
+        playlist_files = os.listdir("slurper_state")
+        this_weeks_plf = pl_file_str(this_week)
+        if this_weeks_plf in playlist_files:
+            with open("slurper_state/{0}".format(this_weeks_plf)) as plf:
+                # should be a list of dicts
+                try:
+                    recs = json.load(plf)
+                    for rec in recs:
+                        self.songs[this_week].add(SongRecMeta.from_dict(rec))
+                except(json.JSONDecodeError):
+                    print("tried to load bad playlist json")
+
+    
     def load_previous_state(self):
         print("Loading previous spotify cog state...")
         with open("slurper_state/spotify.json") as statefile:
@@ -83,6 +87,13 @@ class SpotifyCog(commands.Cog, name="Spotify"):
         with open("slurper_state/spotify.json", 'w+') as statefile:
             json.dump(state, statefile)
 
+        loaded_weeks = self.songs.keys()
+        for wk in loaded_weeks:
+            print(wk)
+            wk_plf = pl_file_str(wk)
+            with open("slurper_state/{0}".format(wk_plf), "w+") as out:
+                json.dump([s.to_dict() for s in self.songs[wk]], out)
+
     @commands.Cog.listener()
     async def on_message(self, msg):
         if msg.channel.id not in self.listening_in:
@@ -91,10 +102,12 @@ class SpotifyCog(commands.Cog, name="Spotify"):
             return
         if len(msg.embeds) > 0:
             spotify_uris = filter(is_valid_spotify_uri, [
-                                  extract_spotify_uri(e.url) for e in msg.embeds])
+                                  SpotifyURI.from_link(e.url) for e in msg.embeds])
             tracks = list(filter(is_track, spotify_uris))
+            wk = self.which_week()
             for t in tracks:
-                print(t)
+                self.songs[wk].add(SongRecMeta(
+                    t, msg.author.id, msg.guild.id))
 
     @commands.command()
     async def slurp(self, ctx, *, channel: discord.TextChannel = None):
@@ -124,7 +137,7 @@ class SpotifyCog(commands.Cog, name="Spotify"):
         await ctx.send("I am listening for recommendations in {0}. I am announcing playlists in {1}.".format(", ".join(l_refs), ", ".join(r_refs)))
 
     @commands.command()
-    async def stop(self, ctx, *, channel:discord.TextChannel=None):
+    async def stop(self, ctx, *, channel: discord.TextChannel = None):
         """ Stop doing anything here, or in the channel provided."""
         if not channel:
             channel = ctx.channel

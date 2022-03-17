@@ -1,5 +1,8 @@
 # don't publish secrets 
 secrets.json
+.cache
 
 .vscode
 __ipynb_checkpoints__
+__pycache__
+slurper_state
