@@ -1,47 +1,28 @@
-from dataclasses import dataclass
 import json
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
 
 import discord
+import spotipy
 from discord.ext import commands, tasks
+from spotipy.oauth2 import SpotifyClientCredentials
 
-from utils import SongRecMeta, SpotifyURI
+from utils import SongRecMeta, SpotifyURI, is_track, is_valid_spotify_uri
 
+_STATE_DIR = "slurper_state"
+_SPOTIFY_STATE_FILENAME = "spotify.json"
+_SPOTIFY_STATE = os.path.join(_STATE_DIR, _SPOTIFY_STATE_FILENAME)
 
-def is_valid_spotify_uri(uri):
-    return uri.resource_type is not None and uri.id is not None
-
-
-def is_track(uri):
-    return uri.resource_type == "track"
-
-
-def is_album(uri):
-    return uri.resource_type == "album"
-
-
-def is_playlist(uri):
-    return uri.resource_type == "playlist"
-
-
-def is_user(uri):
-    return uri.resource_type == "user"
-
-
-def is_artist(uri):
-    return uri.resource_type == "artist"
+def rec_meta_by_week(week):
+    """ Generates the file path to a given week's recommendation metadata"""
+    return os.path.join(_STATE_DIR, "recommendations_meta.{0}.{1}.json".format(*week))
 
 def which_week():
         """ return the current year and week as a 2-tuple of ints"""
         utc_now = datetime.now(tz=timezone.utc)
         this_week = utc_now.isocalendar()[:2]
         return this_week
-
-def pl_file_str(week):
-    return "songs.{0}.{1}.json".format(*week)
 
 
 class SpotifyCog(commands.Cog, name="Spotify"):
@@ -58,10 +39,10 @@ class SpotifyCog(commands.Cog, name="Spotify"):
         self.songs = dict()
         this_week = which_week()
         self.songs.update({this_week: set()})
-        playlist_files = os.listdir("slurper_state")
-        this_weeks_plf = pl_file_str(this_week)
+        playlist_files = os.listdir(_STATE_DIR)
+        this_weeks_plf = rec_meta_by_week(this_week)
         if this_weeks_plf in playlist_files:
-            with open("slurper_state/{0}".format(this_weeks_plf)) as plf:
+            with open(os.path.join(_STATE_DIR, this_weeks_plf)) as plf:
                 # should be a list of dicts
                 try:
                     recs = json.load(plf)
@@ -73,7 +54,7 @@ class SpotifyCog(commands.Cog, name="Spotify"):
     
     def load_previous_state(self):
         print("Loading previous spotify cog state...")
-        with open("slurper_state/spotify.json") as statefile:
+        with open(_SPOTIFY_STATE) as statefile:
             state = json.load(statefile)
         for id in state["listening_in"]:
             self.listening_in.add(id)
@@ -84,13 +65,13 @@ class SpotifyCog(commands.Cog, name="Spotify"):
         print("Saving Spotify cog state...")
         state = {"listening_in": list(self.listening_in),
                  "recs_at": list(self.recs_at)}
-        with open("slurper_state/spotify.json", 'w+') as statefile:
+        with open(_SPOTIFY_STATE, 'w+') as statefile:
             json.dump(state, statefile)
 
         loaded_weeks = self.songs.keys()
         for wk in loaded_weeks:
             print(wk)
-            wk_plf = pl_file_str(wk)
+            wk_plf = rec_meta_by_week(wk)
             with open("slurper_state/{0}".format(wk_plf), "w+") as out:
                 json.dump([s.to_dict() for s in self.songs[wk]], out)
 

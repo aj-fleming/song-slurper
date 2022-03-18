@@ -33,6 +33,30 @@ class SpotifyURI:
         return {"resource_type": self.resource_type, "id": self.id}
 
 
+def is_valid_spotify_uri(uri):
+    return uri.resource_type is not None and uri.id is not None
+
+
+def is_track(uri):
+    return uri.resource_type == "track"
+
+
+def is_album(uri):
+    return uri.resource_type == "album"
+
+
+def is_playlist(uri):
+    return uri.resource_type == "playlist"
+
+
+def is_user(uri):
+    return uri.resource_type == "user"
+
+
+def is_artist(uri):
+    return uri.resource_type == "artist"
+
+
 @dataclass
 class SongRecMeta:
     """ Data class for keeping track of song suggestions. """
