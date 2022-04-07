@@ -1,5 +1,6 @@
 import json
 import os
+import pandas as pd
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -32,24 +33,13 @@ class SpotifyCog(commands.Cog, name="Spotify"):
         self.listening_in = set()  # channel IDs to get spotify links from
         self.recs_at = set()  # channel IDs to post playlist links to
 
+        # load the old channel ids
+        # TODO save (guild, channel) pairs for less discord api calls
         if os.path.isfile("slurper_state/spotify.json"):
             self.load_previous_state()
 
         # songs: dict from (year, week) -> SongRecMeta struct
-        self.songs = dict()
-        this_week = which_week()
-        self.songs.update({this_week: set()})
-        playlist_files = os.listdir(_STATE_DIR)
-        this_weeks_plf = rec_meta_by_week(this_week)
-        if this_weeks_plf in playlist_files:
-            with open(os.path.join(_STATE_DIR, this_weeks_plf)) as plf:
-                # should be a list of dicts
-                try:
-                    recs = json.load(plf)
-                    for rec in recs:
-                        self.songs[this_week].add(SongRecMeta.from_dict(rec))
-                except(json.JSONDecodeError):
-                    print("tried to load bad playlist json")
+        self.songs = []
 
     
     def load_previous_state(self):
@@ -72,7 +62,7 @@ class SpotifyCog(commands.Cog, name="Spotify"):
         for wk in loaded_weeks:
             print(wk)
             wk_plf = rec_meta_by_week(wk)
-            with open("slurper_state/{0}".format(wk_plf), "w+") as out:
+            with open(wk_plf, "w+") as out:
                 json.dump([s.to_dict() for s in self.songs[wk]], out)
 
     @commands.Cog.listener()
