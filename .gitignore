@@ -2,6 +2,9 @@
 secrets.json
 .cache
 
+# don't publish the database
+*.db
+
 .vscode
 __ipynb_checkpoints__
 __pycache__

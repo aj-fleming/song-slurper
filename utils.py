@@ -4,16 +4,16 @@ from dataclasses import dataclass
 class SpotifyURI:
     def __init__(self, resource_type, id):
         self.resource_type = resource_type
-        self.id = id
+        self.identifier = id
 
     def __str__(self) -> str:
-        return "spotify:{0}:{1}".format(self.resource_type, self.id)
+        return "spotify:{0}:{1}".format(self.resource_type, self.identifier)
 
     def __eq__(self, __o: object) -> bool:
-        return (__o.id == self.id) if isinstance(__o, SpotifyURI) else False
+        return (__o.identifier == self.identifier) if isinstance(__o, SpotifyURI) else False
 
     def __hash__(self):
-        return hash(self.id)
+        return hash(self.identifier)
 
     @classmethod
     def from_dict(cls, s: dict):
@@ -30,11 +30,11 @@ class SpotifyURI:
         return uri
 
     def to_dict(self) -> dict:
-        return {"resource_type": self.resource_type, "id": self.id}
+        return {"resource_type": self.resource_type, "id": self.identifier}
 
 
 def is_valid_spotify_uri(uri):
-    return uri.resource_type is not None and uri.id is not None
+    return uri.resource_type is not None and uri.identifier is not None
 
 
 def is_track(uri):

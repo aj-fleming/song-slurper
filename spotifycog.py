@@ -1,8 +1,9 @@
+from datetime import datetime, timezone
 import json
 import os
 import pandas as pd
-from dataclasses import dataclass
-from datetime import datetime, timezone
+import sqlalchemy as sqla
+
 
 import discord
 import spotipy
@@ -14,34 +15,42 @@ from utils import SongRecMeta, SpotifyURI, is_track, is_valid_spotify_uri
 _STATE_DIR = "slurper_state"
 _SPOTIFY_STATE_FILENAME = "spotify.json"
 _SPOTIFY_STATE = os.path.join(_STATE_DIR, _SPOTIFY_STATE_FILENAME)
+_RECS_DB = "recommendations.db"
+
 
 def rec_meta_by_week(week):
     """ Generates the file path to a given week's recommendation metadata"""
     return os.path.join(_STATE_DIR, "recommendations_meta.{0}.{1}.json".format(*week))
 
+
 def which_week():
-        """ return the current year and week as a 2-tuple of ints"""
-        utc_now = datetime.now(tz=timezone.utc)
-        this_week = utc_now.isocalendar()[:2]
-        return this_week
+    """ return the current year and week as a 2-tuple of ints"""
+    utc_now = datetime.now(tz=timezone.utc)
+    this_week = utc_now.isocalendar()[:2]
+    return this_week
 
 
 class SpotifyCog(commands.Cog, name="Spotify"):
     def __init__(self, bot):
         # set up clean state
         self.bot = bot
+        # these get set later
+        # we hope!
+        self.dbengine = None
+        self.dbmeta = None
+        self.recs_table = None
+
         self.listening_in = set()  # channel IDs to get spotify links from
         self.recs_at = set()  # channel IDs to post playlist links to
 
-        # load the old channel ids
+        # load channel ids
         # TODO save (guild, channel) pairs for less discord api calls
         if os.path.isfile("slurper_state/spotify.json"):
             self.load_previous_state()
 
-        # songs: dict from (year, week) -> SongRecMeta struct
+        # songs: list of dicts matching the recommendations table schema
         self.songs = []
 
-    
     def load_previous_state(self):
         print("Loading previous spotify cog state...")
         with open(_SPOTIFY_STATE) as statefile:
@@ -57,13 +66,9 @@ class SpotifyCog(commands.Cog, name="Spotify"):
                  "recs_at": list(self.recs_at)}
         with open(_SPOTIFY_STATE, 'w+') as statefile:
             json.dump(state, statefile)
-
-        loaded_weeks = self.songs.keys()
-        for wk in loaded_weeks:
-            print(wk)
-            wk_plf = rec_meta_by_week(wk)
-            with open(wk_plf, "w+") as out:
-                json.dump([s.to_dict() for s in self.songs[wk]], out)
+        if len(self.songs) > 0:
+            with self.dbengine.begin() as conn:
+                conn.execute(sqla.insert(self.recs_table, self.songs))
 
     @commands.Cog.listener()
     async def on_message(self, msg):
@@ -75,10 +80,15 @@ class SpotifyCog(commands.Cog, name="Spotify"):
             spotify_uris = filter(is_valid_spotify_uri, [
                                   SpotifyURI.from_link(e.url) for e in msg.embeds])
             tracks = list(filter(is_track, spotify_uris))
-            wk = self.which_week()
+
+            tstamp = pd.Timestamp.utcnow().isoformat()
             for t in tracks:
-                self.songs[wk].add(SongRecMeta(
-                    t, msg.author.id, msg.guild.id))
+                self.songs.append({"resource_type": t.resource_type,
+                                   "uri": t.identifier,
+                                   "guild": msg.guild.id,
+                                   "channel": msg.channel.id,
+                                   "user": msg.author.id,
+                                   "timestamp": tstamp})
 
     @commands.command()
     async def slurp(self, ctx, *, channel: discord.TextChannel = None):
