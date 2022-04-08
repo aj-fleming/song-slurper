@@ -1,5 +1,14 @@
 from dataclasses import dataclass
+import os
 
+from spotipy import CacheFileHandler
+
+# handle directory of cache files for different Spotify usernames
+class CacheDirectoryHandler(CacheFileHandler):
+    def __init__(self, cache_directory, username):
+        if not os.path.isdir(cache_directory):
+            os.mkdir(cache_directory)
+        self.cache_path = f"{cache_directory}/.token-cache-{username}"
 
 class SpotifyURI:
     def __init__(self, resource_type, id):

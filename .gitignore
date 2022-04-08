@@ -9,3 +9,4 @@ secrets.json
 __ipynb_checkpoints__
 __pycache__
 slurper_state
+spotify_token_cache
