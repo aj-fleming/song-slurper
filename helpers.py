@@ -5,6 +5,9 @@ from spotipy import CacheFileHandler
 
 # handle directory of cache files for different Spotify usernames
 class CacheDirectoryHandler(CacheFileHandler):
+    """
+    Class to handle the creation and naming of token cache files for spotipy
+    """
     def __init__(self, cache_directory, username):
         if not os.path.isdir(cache_directory):
             os.mkdir(cache_directory)
