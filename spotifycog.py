@@ -4,13 +4,15 @@ import os
 import pandas as pd
 import sqlalchemy as sqla
 
-
 import discord
-import spotipy
 from discord.ext import commands, tasks
-from spotipy.oauth2 import SpotifyClientCredentials
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
 
-from utils import SongRecMeta, SpotifyURI, is_track, is_valid_spotify_uri
+from slurp_utils import SongRecMeta, SpotifyURI, is_track, is_valid_spotify_uri
+
+_SPOTIFY_SCOPES = ("user-library-read", "playlist-modify-public")
+
 
 _STATE_DIR = "slurper_state"
 _SPOTIFY_STATE_FILENAME = "spotify.json"
