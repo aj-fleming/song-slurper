@@ -88,6 +88,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
                                        "channel": msg.channel.id,
                                        "user": msg.author.id,
                                        "timestamp": tstamp})
+                song_logger.debug(f"there are currently {len(self.songs)} items in the song list")
 
     @commands.command()
     async def slurp(self, ctx, *, channel: discord.TextChannel = None):
@@ -98,6 +99,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
         if not channel:
             channel = ctx.channel
         self.bot.state[ctx.guild.id]["listening_to"].add(channel.id)
+        song_logger.info(f"now listening to channel {channel.id} in guild {ctx.guild.id}")
         await channel.send(f"I am now listening to recommendations in <#{channel.id}>")
 
     @commands.command()
@@ -108,6 +110,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
         if not channel:
             channel = ctx.channel
         self.bot.state[ctx.guild.id]["announcing_in"].add(channel.id)
+        song_logger.info(f"now announcing playlists to channel {channel.id} in guild {ctx.guild.id}")
         await channel.send(f"I am now announcing my playlists in <#{channel.id}>")
 
     @commands.command()
@@ -133,18 +136,20 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
             self.bot.state[ctx.guild.id]["listening_to"].remove(channel.id)
         if channel.id in self.bot.state[ctx.guild.id]["announcing_in"]:
             self.bot.state[ctx.guild.id]["announcing_in"].remove(channel.id)
+        song_logger.info(f"dropped channel {channel.id} in guild {ctx.guild.id}")
         await ctx.send(f"No longer using <#{channel.id}> for anything.")
 
     ###
     # insert recommendations into the database periodically
     ###
-    @tasks.loop(hours=12.0)
+    @tasks.loop(minutes=1.0)
     async def songs_db_inserter(self):
         async with self.dblock:
             await self.insert_song_recommendations()
     
     async def insert_song_recommendations(self):
         if len(self.songs) > 0:
+            song_logger.info(f"inserting {len(self.songs)} new reccomendations into the database")
             with self.bot.dbengine.begin() as conn:
                 conn.execute(sqla.insert(self.bot.recs_table, self.songs))
             self.songs.clear()
@@ -152,12 +157,16 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
     @songs_db_inserter.after_loop
     async def on_insert_cancel(self):
         if self.songs_db_inserter.is_being_cancelled() and len(self.songs) > 0:
+            song_logger.info(f"inserting remaining {len(self.songs)} reccomendations into the database")
             await self.insert_song_recommendations()
+        
 
 def setup(bot):
+    song_logger.info("setting up song saving extension")
     bot.add_cog(SongSavingCog(bot))
 
 
 def teardown(bot):
+    song_logger.info("tearing down song saving extension")
     bot.remove_cog('Song Saving')
-    print("Spotify cog unloaded.")
+    

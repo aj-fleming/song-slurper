@@ -25,5 +25,5 @@ def setup(bot):
     bot.add_cog(PlaylistManagementCog(bot))
 
 def teardown(bot):
-    pl_logger.info("tearing down playlist management")
+    pl_logger.info("tearing down playlist extension")
     bot.remove_cog('Playlist Management')
