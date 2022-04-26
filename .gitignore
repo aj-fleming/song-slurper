@@ -5,6 +5,9 @@ secrets.json
 # don't publish the database
 *.db
 
+# don't publish logs
+*.log
+
 .vscode
 __ipynb_checkpoints__
 __pycache__

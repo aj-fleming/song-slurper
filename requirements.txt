@@ -2,7 +2,7 @@ pandas
 numpy
 matplotlib
 
-discord
+discord.py
 spotipy
 
 sqlalchemy
