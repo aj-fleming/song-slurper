@@ -1,3 +1,4 @@
+import dbm
 import json
 import os
 from sqlalchemy import MetaData, Table, Column, Integer, String
@@ -10,12 +11,17 @@ from discord.ext import commands as dcmds
 # set up logging
 ###
 import logging
-logger = logging.getLogger('discord')
-logger.setLevel(logging.DEBUG)
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
-handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
-logger.addHandler(handler)
+discord_logger = logging.getLogger('discord')
+discord_logger.setLevel(logging.DEBUG)
+discord_log = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
+discord_log.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
+discord_logger.addHandler(discord_log)
 
+songbot_logger = logging.getLogger('songbot')
+songbot_logger.setLevel(logging.DEBUG)
+songbot_log = logging.FileHandler(filename='songbot.log', encoding='utf-8', mode='w')
+songbot_log.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
+songbot_logger.addHandler(songbot_log)
 ###
 # set up discord bot intents
 ###
@@ -41,6 +47,10 @@ recs_table = Table("recommendations", dbmeta,
                    Column("timestamp", String))
 dbmeta.create_all(dbengine)
 
+songbot.dbmeta = dbmeta
+songbot.recs_table = recs_table
+songbot.dbengine = dbengine
+
 ###
 # various listeners and bot things
 ###
@@ -50,18 +60,11 @@ async def announce_ready():
     print(f"logged in as {songbot.user}")
 
 @songbot.command()
-async def respotify(ctx):
-    """ Reload the Spotify component. """
+async def reset(ctx):
+    """ Reload all components. """
     async with ctx.typing():
-        songbot.reload_extension('spotifycog')
-        forward_dbengine()
-
-def forward_dbengine():
-    spcog = songbot.get_cog('Spotify')
-    if spcog:
-        spcog.dbengine = dbengine
-        spcog.dbmeta = dbmeta
-        spcog.recs_table = recs_table
+        songbot.reload_extension('songcog')
+        songbot.reload_extension('playlistscog')
 
 
 if __name__ == "__main__":
@@ -73,6 +76,6 @@ if __name__ == "__main__":
     if not os.path.isdir("slurper_state"):
         os.mkdir("slurper_state")
 
-    songbot.load_extension('spotifycog')
-    forward_dbengine()
+    songbot.load_extension('songcog')
+    songbot.load_extension('playlistscog')
     songbot.run(os.environ["DISCORD_CLIENT_SECRET"])
