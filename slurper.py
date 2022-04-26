@@ -1,16 +1,33 @@
 import json
 import os
-import time
 from sqlalchemy import MetaData, Table, Column, Integer, String
 from sqlalchemy import create_engine
 
 import discord
 from discord.ext import commands as dcmds
 
+###
+# set up logging
+###
+import logging
+logger = logging.getLogger('discord')
+logger.setLevel(logging.DEBUG)
+handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
+handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
+logger.addHandler(handler)
+
+###
+# set up discord bot intents
+###
+
 intents = discord.Intents.default()
 intents.members = True
-
 songbot = dcmds.Bot(command_prefix=dcmds.when_mentioned, intents=intents)
+
+###
+# set up database engine
+###
+
 dbengine = create_engine(
     "sqlite+pysqlite:///slurper_state/recommendations.db", echo=True, future=True)
 dbmeta = MetaData()
@@ -24,19 +41,13 @@ recs_table = Table("recommendations", dbmeta,
                    Column("timestamp", String))
 dbmeta.create_all(dbengine)
 
+###
+# various listeners and bot things
+###
+
 @songbot.listen('on_ready')
 async def announce_ready():
     print(f"logged in as {songbot.user}")
-
-async def testcmd(ctx):
-    if ctx.message.reference is not None:
-        await ctx.send("that message references something")
-        refmsg = await ctx.fetch_message(ctx.message.reference.message_id)
-        print(refmsg.id)
-        print(len(refmsg.embeds))
-        for embed in refmsg.embeds:
-            print(embed.url)
-
 
 @songbot.command()
 async def respotify(ctx):

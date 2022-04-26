@@ -1,11 +1,10 @@
+import asyncio
 import json
 import os
-from datetime import datetime, timezone
 
 import discord
 import pandas as pd
 from requests import JSONDecodeError
-import spotipy
 import sqlalchemy as sqla
 from discord.ext import commands, tasks
 from spotipy.oauth2 import SpotifyOAuth
@@ -33,13 +32,14 @@ class SpotifyCog(commands.Cog, name="Spotify"):
         self.dbmeta = None
         self.recs_table = None
 
+        self.dblock = asyncio.Lock()
+
         # load previous state
         if os.path.isfile("slurper_state/spotify.json"):
             try:
                 self.state = self.load_previous_state()
             except JSONDecodeError:
                 print("could not parse previous state, resetting")
-                pass
 
         # songs: list of dicts matching the recommendations table schema
         self.songs = []
@@ -54,7 +54,7 @@ class SpotifyCog(commands.Cog, name="Spotify"):
             for k in announcer.keys():
                 if not announcer[k]:
                     announcer[k] = 0
-            new_state[guild_id] = {
+            new_state[int(guild_id)] = { # need to switch from json string key to int for proper function
                 "announcer": {
                     "discord_id": announcer["discord_id"],
                     "sp_user": announcer["sp_user"]
@@ -68,6 +68,7 @@ class SpotifyCog(commands.Cog, name="Spotify"):
         print("Saving Spotify cog state...")
         with open(_SPOTIFY_STATE, 'w+') as statefile:
             json.dump(self.state, statefile, default=list)
+        
         if len(self.songs) > 0:
             with self.dbengine.begin() as conn:
                 conn.execute(sqla.insert(self.recs_table, self.songs))
@@ -99,7 +100,6 @@ class SpotifyCog(commands.Cog, name="Spotify"):
     @commands.command()
     async def slurp(self, ctx, *, channel: discord.TextChannel = None):
         """ Listen for song suggestions here, or in the provided channel."""
-
         if ctx.guild.id not in self.state.keys():
             self.add_new_guild(ctx.guild.id)
 
@@ -111,10 +111,8 @@ class SpotifyCog(commands.Cog, name="Spotify"):
     @commands.command()
     async def announce(self, ctx, *, channel: discord.TextChannel = None):
         """ Announce playlist suggestions here, or in the provided channel."""
-
         if ctx.guild.id not in self.state.keys():
             self.add_new_guild(ctx.guild.id)
-
         if not channel:
             channel = ctx.channel
         self.state[ctx.guild.id]["announcing_in"].add(channel.id)
@@ -133,7 +131,7 @@ class SpotifyCog(commands.Cog, name="Spotify"):
             await ctx.send("I am listening for recommendations in {0}. I am announcing playlists in {1}.".format(", ".join(l_refs), ", ".join(r_refs)))
 
     @commands.command()
-    async def stop(self, ctx, *, channel: discord.TextChannel = None):
+    async def ignore(self, ctx, *, channel: discord.TextChannel = None):
         """ Stop doing anything here, or in the channel provided."""
         if ctx.guild.id not in self.state.keys():
             return
@@ -145,14 +143,30 @@ class SpotifyCog(commands.Cog, name="Spotify"):
             self.state[ctx.guild.id]["announcing_in"].remove(channel.id)
         await ctx.send(f"No longer using <#{channel.id}> for anything.")
 
+    ###
+    # insert recommendations into the database periodically
+    ###
+    @tasks.loop(hours=12.0)
+    async def songs_db_inserter(self):
+        async with self.dblock:
+            await self.insert_song_recommendations()
+    
+    async def insert_song_recommendations(self):
+        if len(self.songs) > 0:
+            with self.dbengine.begin() as conn:
+                conn.execute(sqla.insert(self.recs_table, self.songs))
+            self.songs.clear()
+    
+    @songs_db_inserter.after_loop
+    async def on_insert_cancel(self):
+        if self.songs_db_inserter.is_being_cancelled() and len(self.songs) > 0:
+            await self.insert_song_recommendations()
 
 def setup(bot):
-    print("Loading Spotify cog!")
     bot.add_cog(SpotifyCog(bot))
     print("Spotify cog loaded.")
 
 
 def teardown(bot):
-    print("Unloading Spotify cog!")
     bot.remove_cog('Spotify')
     print("Spotify cog unloaded.")
