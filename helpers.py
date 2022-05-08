@@ -1,17 +1,40 @@
-from dataclasses import dataclass
+import asyncio
 import os
 
+import pandas as pd
 from spotipy import CacheFileHandler
 
+
+async def wait_until(dt: pd.Timestamp):
+    """ Sleeps until specified datetime
+
+    Args:
+        dt (pd.Timestamp): when to resume execution, in UTC!
+    """
+    now = pd.Timestamp.utcnow()
+    if dt <= now:
+        return
+    await asyncio.sleep((dt - now).total_seconds())
+
+
+async def run_at(coro, dt: pd.Timestamp):
+
+    await wait_until(dt)
+    return await coro
+
 # handle directory of cache files for different Spotify usernames
+
+
 class CacheDirectoryHandler(CacheFileHandler):
     """
     Class to handle the creation and naming of token cache files for spotipy
     """
+
     def __init__(self, cache_directory, username):
         if not os.path.isdir(cache_directory):
             os.mkdir(cache_directory)
         self.cache_path = f"{cache_directory}/.token-cache-{username}"
+
 
 class SpotifyURI:
     def __init__(self, resource_type, id):
@@ -38,7 +61,7 @@ class SpotifyURI:
             return cls(None, None)
         # we have a spotify link, remove any GET parameters from the last bit
         # and fuse everything back together
-        uri = cls(s[-2], s[-1].split("&")[0])
+        uri = cls(s[-2], s[-1].split("?")[0])
         return uri
 
     def to_dict(self) -> dict:
@@ -67,21 +90,3 @@ def is_user(uri):
 
 def is_artist(uri):
     return uri.resource_type == "artist"
-
-
-@dataclass
-class SongRecMeta:
-    """ Data class for keeping track of song suggestions. """
-    track: SpotifyURI
-    user_id: int
-    guild_id: int
-
-    def __hash__(self):
-        return hash((self.track, self.user_id, self.guild_id))
-
-    @classmethod
-    def from_dict(cls, d: dict):
-        return cls(SpotifyURI.from_dict(d["track"]), d["user_id"], d["guild_id"])
-
-    def to_dict(self) -> dict:
-        return {"track": self.track.to_dict(), "user_id": self.user_id, "guild_id": self.guild_id}
