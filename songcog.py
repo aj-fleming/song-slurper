@@ -19,6 +19,7 @@ _RECS_DB = "recommendations.db"
 
 song_logger = logging.getLogger('songbot.saving')
 
+
 class SongSavingCog(commands.Cog, name="Song Saving"):
     def __init__(self, bot):
         # set up clean state
@@ -34,6 +35,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
 
         # songs: list of dicts matching the recommendations table schema
         self.songs = []
+        self.songs_db_inserter.start()
 
     def load_previous_state(self):
         print("Loading previous spotify cog state...")
@@ -45,7 +47,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
             for k in announcer.keys():
                 if not announcer[k]:
                     announcer[k] = 0
-            new_state[int(guild_id)] = { # need to switch from json string key to int for proper function
+            new_state[int(guild_id)] = {  # need to switch from json string key to int for proper function
                 "announcer": {
                     "discord_id": announcer["discord_id"],
                     "sp_user": announcer["sp_user"]
@@ -59,15 +61,31 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
         print("Saving Spotify cog state...")
         with open(_SPOTIFY_STATE, 'w+') as statefile:
             json.dump(self.bot.state, statefile, default=list)
-        
-        if len(self.songs) > 0:
-            with self.bot.dbengine.begin() as conn:
-                conn.execute(sqla.insert(self.bot.recs_table, self.songs))
 
     def add_new_guild(self, new_id):
         song_logger.info(f"now configured in guild {new_id}")
         self.bot.state.update({new_id: {"announcer": {"discord_id": 0, "sp_user": 0},
-                                    "listening_to": set(), "announcing_in": set()}})
+                                        "listening_to": set(), "announcing_in": set()}})
+
+    async def collect_spotify_resources_from_msg(self, msg):
+        song_logger.debug(
+            f"found {len(msg.embeds)} embeds on message {msg.id}")
+        spotify_uris = [u for u in
+                        [SpotifyURI.from_link(e.url) for e in msg.embeds]
+                        if is_valid_spotify_uri(u)]
+        song_logger.debug(
+            f"found {len(spotify_uris)} spotify embeds on {msg.id}")
+        tstamp = pd.Timestamp.utcnow().tz_localize(tz=None)
+        for t in spotify_uris:
+            song_logger.debug(f"saving spotify resource {t}")
+            self.songs.append({"resource_type": t.resource_type,
+                               "uri": t.identifier,
+                               "guild": msg.guild.id,
+                               "channel": msg.channel.id,
+                               "user": msg.author.id,
+                               "timestamp": tstamp})
+            song_logger.debug(
+                f"there are currently {len(self.songs)} items in the song list")
 
     @commands.Cog.listener()
     async def on_message(self, msg):
@@ -77,18 +95,22 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
             if msg.channel.id not in self.bot.state[msg.guild.id]["listening_to"]:
                 return
             if len(msg.embeds) > 0:
-                spotify_uris = filter(is_valid_spotify_uri, [
-                    SpotifyURI.from_link(e.url) for e in msg.embeds])
-                tstamp = pd.Timestamp.utcnow().isoformat()
-                for t in spotify_uris:
-                    song_logger.debug(f"saving spotify resource {t}")
-                    self.songs.append({"resource_type": t.resource_type,
-                                       "uri": t.identifier,
-                                       "guild": msg.guild.id,
-                                       "channel": msg.channel.id,
-                                       "user": msg.author.id,
-                                       "timestamp": tstamp})
-                song_logger.debug(f"there are currently {len(self.songs)} items in the song list")
+                await self.collect_spotify_resources_from_msg(msg)
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, msg_old, msg_new):
+
+        # If the number of embeds in the message has changed,
+        # check to see if any of them are spotify embeds.
+
+        if msg_old.author.id == self.bot.user.id:
+            return
+        if msg_old.guild.id in self.bot.state:
+            if msg_old.channel.id not in self.bot.state[msg_old.guild.id]["listening_to"]:
+                return
+
+        if len(msg_old.embeds) < len(msg_new.embeds):
+            await self.collect_spotify_resources_from_msg(msg_new)
 
     @commands.command()
     async def slurp(self, ctx, *, channel: discord.TextChannel = None):
@@ -99,7 +121,8 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
         if not channel:
             channel = ctx.channel
         self.bot.state[ctx.guild.id]["listening_to"].add(channel.id)
-        song_logger.info(f"now listening to channel {channel.id} in guild {ctx.guild.id}")
+        song_logger.info(
+            f"now listening to channel {channel.id} in guild {ctx.guild.id}")
         await channel.send(f"I am now listening to recommendations in <#{channel.id}>")
 
     @commands.command()
@@ -110,7 +133,8 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
         if not channel:
             channel = ctx.channel
         self.bot.state[ctx.guild.id]["announcing_in"].add(channel.id)
-        song_logger.info(f"now announcing playlists to channel {channel.id} in guild {ctx.guild.id}")
+        song_logger.info(
+            f"now announcing playlists to channel {channel.id} in guild {ctx.guild.id}")
         await channel.send(f"I am now announcing my playlists in <#{channel.id}>")
 
     @commands.command()
@@ -136,30 +160,35 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
             self.bot.state[ctx.guild.id]["listening_to"].remove(channel.id)
         if channel.id in self.bot.state[ctx.guild.id]["announcing_in"]:
             self.bot.state[ctx.guild.id]["announcing_in"].remove(channel.id)
-        song_logger.info(f"dropped channel {channel.id} in guild {ctx.guild.id}")
+        song_logger.info(
+            f"dropped channel {channel.id} in guild {ctx.guild.id}")
         await ctx.send(f"No longer using <#{channel.id}> for anything.")
 
     ###
     # insert recommendations into the database periodically
     ###
-    @tasks.loop(minutes=1.0)
+    @tasks.loop(minutes=5.0)
     async def songs_db_inserter(self):
         async with self.dblock:
+            song_logger.info("automatically inserting songs into database")
             await self.insert_song_recommendations()
-    
+
     async def insert_song_recommendations(self):
         if len(self.songs) > 0:
-            song_logger.info(f"inserting {len(self.songs)} new reccomendations into the database")
-            with self.bot.dbengine.begin() as conn:
-                conn.execute(sqla.insert(self.bot.recs_table, self.songs))
+            song_logger.info(
+                f"inserting {len(self.songs)} new reccomendations into the database")
+            async with self.bot.dbengine.begin() as conn:
+                await conn.execute(sqla.insert(self.bot.recs_table, self.songs))
             self.songs.clear()
-    
+
     @songs_db_inserter.after_loop
     async def on_insert_cancel(self):
         if self.songs_db_inserter.is_being_cancelled() and len(self.songs) > 0:
-            song_logger.info(f"inserting remaining {len(self.songs)} reccomendations into the database")
-            await self.insert_song_recommendations()
-        
+            async with self.dblock:
+                song_logger.info(
+                    f"inserting remaining {len(self.songs)} reccomendations into the database")
+                await self.insert_song_recommendations()
+
 
 def setup(bot):
     song_logger.info("setting up song saving extension")
@@ -169,4 +198,3 @@ def setup(bot):
 def teardown(bot):
     song_logger.info("tearing down song saving extension")
     bot.remove_cog('Song Saving')
-    
