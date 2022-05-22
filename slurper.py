@@ -69,13 +69,21 @@ if __name__ == "__main__":
         "postgresql+asyncpg://songbot:s0ngz@localhost/songsdb", future=True)
     dbmeta = MetaData()
     recs_table = Table("recommendations", dbmeta,
-                       Column("id", Integer, primary_key=True),
+                       Column("id", Integer, primary_key=True, autoincrement="auto"),
                        Column("resource_type", String),
                        Column("uri", String),
                        Column("guild", BigInteger),
                        Column("channel", BigInteger),
+                       Column("message", BigInteger),
                        Column("user", BigInteger),
                        Column("timestamp", DateTime))
+                       
+    plist_table = Table("playlists", dbmeta,
+                        Column("id", Integer, primary_key=True),
+                        Column("media_type", String),
+                        Column("uri", String),
+                        Column("guild", BigInteger),
+                        Column("creation_timestamp", DateTime))
 
     songbot.dbmeta = dbmeta
     songbot.recs_table = recs_table
@@ -83,6 +91,7 @@ if __name__ == "__main__":
 
     async def setup_db():
         async with dbengine.begin() as conn:
+            await conn.run_sync(dbmeta.drop_all)
             await conn.run_sync(dbmeta.create_all)
 
     songbot.loop.create_task(setup_db())

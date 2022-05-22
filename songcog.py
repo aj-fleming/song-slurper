@@ -82,6 +82,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
                                "uri": t.identifier,
                                "guild": msg.guild.id,
                                "channel": msg.channel.id,
+                               "message": msg.id,
                                "user": msg.author.id,
                                "timestamp": tstamp})
             song_logger.debug(
