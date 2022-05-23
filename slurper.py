@@ -42,6 +42,8 @@ songbot = dcmds.Bot(command_prefix=dcmds.when_mentioned, intents=intents)
 @songbot.listen('on_ready')
 async def announce_ready():
     songbot_logger.info(f"logged in as {songbot.user}")
+    songbot.load_extension('songcog')
+    songbot.load_extension('playlistscog')
 
 
 @songbot.command()
@@ -95,6 +97,4 @@ if __name__ == "__main__":
             await conn.run_sync(dbmeta.create_all)
 
     songbot.loop.create_task(setup_db())
-    songbot.load_extension('songcog')
-    songbot.load_extension('playlistscog')
     songbot.run(os.environ["DISCORD_CLIENT_SECRET"])
