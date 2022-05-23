@@ -54,7 +54,7 @@ async def reset(ctx):
 
 
 if __name__ == "__main__":
-    print("starting slurper")
+    songbot_logger.info("starting up slurper")
     with open("secrets.json", 'r') as secretsfile:
         secrets = json.load(secretsfile)
         for k in secrets.keys():

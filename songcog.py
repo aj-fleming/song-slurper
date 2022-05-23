@@ -38,7 +38,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
         self.songs_db_inserter.start()
 
     def load_previous_state(self):
-        print("Loading previous spotify cog state...")
+        song_logger.info("Loading previous spotify cog state...")
         with open(_SPOTIFY_STATE) as statefile:
             old_state = json.load(statefile)
         new_state = {}
@@ -58,7 +58,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
         return new_state
 
     def cog_unload(self):
-        print("Saving Spotify cog state...")
+        song_logger.info("Saving Spotify cog state...")
         with open(_SPOTIFY_STATE, 'w+') as statefile:
             json.dump(self.bot.state, statefile, default=list)
 
@@ -75,18 +75,18 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
                         if is_valid_spotify_uri(u)]
         song_logger.debug(
             f"found {len(spotify_uris)} spotify embeds on {msg.id}")
-        tstamp = pd.Timestamp.utcnow().tz_localize(tz=None)
+        tstamp = pd.Timestamp(msg.created_at)
+        songs = []
         for t in spotify_uris:
             song_logger.debug(f"saving spotify resource {t}")
-            self.songs.append({"resource_type": t.resource_type,
-                               "uri": t.identifier,
-                               "guild": msg.guild.id,
-                               "channel": msg.channel.id,
-                               "message": msg.id,
-                               "user": msg.author.id,
-                               "timestamp": tstamp})
-            song_logger.debug(
-                f"there are currently {len(self.songs)} items in the song list")
+            songs.append({"resource_type": t.resource_type,
+                          "uri": t.identifier,
+                          "guild": msg.guild.id,
+                          "channel": msg.channel.id,
+                          "message": msg.id,
+                          "user": msg.author.id,
+                          "timestamp": tstamp})
+        return songs
 
     @commands.Cog.listener()
     async def on_message(self, msg):
@@ -96,7 +96,7 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
             if msg.channel.id not in self.bot.state[msg.guild.id]["listening_to"]:
                 return
             if len(msg.embeds) > 0:
-                await self.collect_spotify_resources_from_msg(msg)
+                self.songs.extend(await self.collect_spotify_resources_from_msg(msg))
 
     @commands.Cog.listener()
     async def on_message_edit(self, msg_old, msg_new):
@@ -111,10 +111,10 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
                 return
 
         if len(msg_old.embeds) < len(msg_new.embeds):
-            await self.collect_spotify_resources_from_msg(msg_new)
+            self.songs.extend(await self.collect_spotify_resources_from_msg(msg_new))
 
     @commands.command()
-    async def slurp(self, ctx, *, channel: discord.TextChannel = None):
+    async def listen(self, ctx, *, channel: discord.TextChannel = None):
         """ Listen for song suggestions here, or in the provided channel."""
         if ctx.guild.id not in self.bot.state.keys():
             self.add_new_guild(ctx.guild.id)
@@ -125,6 +125,46 @@ class SongSavingCog(commands.Cog, name="Song Saving"):
         song_logger.info(
             f"now listening to channel {channel.id} in guild {ctx.guild.id}")
         await channel.send(f"I am now listening to recommendations in <#{channel.id}>")
+
+    @commands.command()
+    async def slurp(self, ctx, start_dt: str):
+        """Load all messages and search for spotify attachments, then save them.
+
+        Args:
+            start_dt (str): ISO-parseable datetime string as the UTC timestamp of the earliest message to get.
+            Set to "all" for all messages in channel (may take some time!)
+        """
+        if start_dt == "all":
+            after = pd.Timestamp(ctx.channel.created_at)
+        else:
+            try:
+                after = pd.Timestamp(start_dt)
+            except:
+                await ctx.send("Datetime unparseable!")
+                return
+
+        if ctx.guild.id not in self.bot.state.keys():
+            return
+
+        song_logger.info(
+            f"searching in {ctx.channel.id} for songs attached to all messages after {after}")
+        old_songs = []
+        async with ctx.typing():
+            async with self.bot.dbengine.begin() as conn:
+                result = await conn.execute(sqla.select(self.bot.recs_table))
+            data = pd.DataFrame(result.fetchall())
+            if not data.empty:
+                data = data.set_index("id")
+            async for msg in ctx.channel.history(after=after.to_pydatetime()):
+                # short circuiting saves us here
+                if (data.empty or msg.id not in data["message"].values) and len(msg.embeds) > 0:
+                    old_songs.extend(await self.collect_spotify_resources_from_msg(msg))
+            async with self.bot.dbengine.begin() as conn:
+                await conn.execute(sqla.insert(self.bot.recs_table, old_songs))
+            song_logger.info(
+                f"saved {len(old_songs)} songs from {ctx.channel.id} that were not in database")
+            await ctx.send("Found {0} old recommendations sent after {1} that I didn't have!".format(
+                len(old_songs), after.isoformat(sep=':', timespec='minutes')))
 
     @commands.command()
     async def announce(self, ctx, *, channel: discord.TextChannel = None):
