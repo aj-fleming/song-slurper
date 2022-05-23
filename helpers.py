@@ -11,7 +11,7 @@ async def wait_until(dt: pd.Timestamp):
     Args:
         dt (pd.Timestamp): when to resume execution, in UTC!
     """
-    now = pd.Timestamp.utcnow()
+    now = pd.Timestamp.utcnow().tz_localize(tz=None)
     if dt <= now:
         return
     await asyncio.sleep((dt - now).total_seconds())
